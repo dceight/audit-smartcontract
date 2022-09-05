@@ -5,9 +5,8 @@ pragma solidity ^0.8.7;
 import "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";
 import "@openzeppelin/contracts/token/ERC1155/extensions/ERC1155URIStorage.sol";
 import "@openzeppelin/contracts/utils/Counters.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
 
-contract DC8NFT is ERC1155URIStorage, Ownable {
+contract DC8NFT is ERC1155URIStorage {
     using Counters for Counters.Counter;
     using Strings for uint256;
     Counters.Counter private _tokenIds;
@@ -15,25 +14,32 @@ contract DC8NFT is ERC1155URIStorage, Ownable {
     string public constant name = "DC8 NFT";
     uint256 constant publicPackagePrice = 0.08 ether;
     uint256 constant privatePackagePrice = 0.06 ether;
-    uint256 initPrice = 0.08 ether;
-    // uint256 constant publicPackagePrice = 0.08 ether;
-    // uint256 constant privatePackagePrice = 0.06 ether;
-    // uint256 initPrice = 0.08 ether;
-    uint256 mintingMax = 8000;
-    bool privateSale = false;
-    address hostWallet = 0x10eA070d906DA60E34310C810f9ad125059D83C6;
-    string private domain = "https://core.dc8.io/meta/details/";
-    uint256 constant PACKAGEx1_PUBLIC = 100001;
-    uint256 constant PACKAGEx5_PUBLIC = 100002;
-    uint256 constant PACKAGEx10_PUBLIC = 100003;
-    uint256 constant PACKAGEx50_PUBLIC = 100004;
-    uint256 constant PACKAGEx1_PRIVATE = 100005;
-    uint256 constant PACKAGEx2_PRIVATE = 100006;
+    uint256 constant initPrice = 0.08 ether;
+    uint256 constant totalSupply = 3000;
+    bool private allowSale = false;
+    bool private allowOpenPkg = false;
+    bool private privateSale = true;
+    address private hostWallet;
 
-    constructor() ERC1155("DC8 NFT") {}
+    string private domain = "https://core.dc8.io/meta/details/";
+    uint256 constant PACKAGEs = 100000;
+    uint256 constant PACKAGEx1_PUBLIC = 1;
+    uint256 constant PACKAGEx5_PUBLIC = 2;
+    uint256 constant PACKAGEx10_PUBLIC = 3;
+    uint256 constant PACKAGEx50_PUBLIC = 4;
+    uint256 constant PACKAGEx1_PRIVATE = 5;
+    uint256 constant PACKAGEx2_PRIVATE = 6;
+
+    constructor() ERC1155("DC8 NFT") {
+        hostWallet = msg.sender;
+        uint256 tokenId = 0;
+        setURI(tokenId, string(abi.encodePacked(domain, tokenId.toString())));
+        _mint(msg.sender, tokenId, 1, "0x0");
+    }
 
     mapping(uint256 => MarketItem) private idToMarketItem;
     mapping(uint256 => PackageItem) private idToPackageItem;
+
     struct MarketItem {
         uint256 tokenId;
         address payable seller;
@@ -57,30 +63,35 @@ contract DC8NFT is ERC1155URIStorage, Ownable {
         _setURI(tokenId, tokenURI);
     }
 
-    function updatePrivateSale(bool _privateSale) public payable {
-        require(msg.sender == hostWallet, "Only host can update private sale.");
-        privateSale = _privateSale;
+    function allowRule(uint256 mode, bool allowed) public payable {
+        require(msg.sender == hostWallet, "Only host can allow it");
+        if (mode == 1) {
+            // sale
+            allowSale = allowed;
+        } else if (mode == 2) {
+            // open package
+            allowOpenPkg = allowed;
+        } else {
+            // private sale
+            privateSale = allowed;
+        }
     }
 
     function getPackage(uint256 pkCode) private pure returns (PackageItem memory) {
-        PackageItem memory pkg = PackageItem(PACKAGEx1_PUBLIC, 0, 1);
-        if (pkCode == 1) {
-            pkg.packageId = PACKAGEx1_PUBLIC;
+        uint256 pkgToken = PACKAGEs + pkCode;
+        PackageItem memory pkg = PackageItem(pkgToken, 0, 1);
+        pkg.packageId = pkgToken;
+        if (pkCode == PACKAGEx1_PUBLIC) {
             pkg.quantity = 1;
-        } else if (pkCode == 2) {
-            pkg.packageId = PACKAGEx5_PUBLIC;
+        } else if (pkCode == PACKAGEx5_PUBLIC) {
             pkg.quantity = 5;
-        } else if (pkCode == 3) {
-            pkg.packageId = PACKAGEx10_PUBLIC;
+        } else if (pkCode == PACKAGEx10_PUBLIC) {
             pkg.quantity = 10;
-        } else if (pkCode == 4) {
-            pkg.packageId = PACKAGEx50_PUBLIC;
+        } else if (pkCode == PACKAGEx50_PUBLIC) {
             pkg.quantity = 50;
-        } else if (pkCode == 5) {
-            pkg.packageId = PACKAGEx1_PRIVATE;
+        } else if (pkCode == PACKAGEx1_PRIVATE) {
             pkg.quantity = 1;
-        } else if (pkCode == 6) {
-            pkg.packageId = PACKAGEx2_PRIVATE;
+        } else if (pkCode == PACKAGEx2_PRIVATE) {
             pkg.quantity = 2;
         } else {
             revert("No package.");
@@ -88,46 +99,50 @@ contract DC8NFT is ERC1155URIStorage, Ownable {
         return pkg;
     }
 
-    function fetchMyPackages(address payable sender) public view returns (PackageItem[] memory) {
+    function fetchMyPackages(address payable user) public view returns (PackageItem[] memory) {
         PackageItem[] memory items = new PackageItem[](6);
         for (uint256 i = 0; i < 6; i++) {
             items[i].packageId = 100000 + i + 1;
-            items[i].amount = this.balanceOf(sender, 100000 + i + 1);
+            items[i].amount = this.balanceOf(user, 100000 + i + 1);
         }
         return items;
     }
 
-    function buyPkg(uint256 pkCode) private {
-        PackageItem memory pkg = getPackage(pkCode);
-        uint256 nextItemCount = pkg.quantity + _tokenIds.current();
-        require(nextItemCount <= mintingMax, "Total supply has reached.");
-        _mint(msg.sender, pkg.packageId, 1, "");
-        string memory mode = "BUY_PUBLIC_PKG";
-        if (privateSale == true) {
-            mode = "BUY_PRIVATE_PKG";
-        }
-        emit packageEvents(pkg.packageId, msg.value, mode);
-    }
-
     function buyPublicPackage(uint256 pkCode) public payable {
-        require(privateSale == false, "No sale now");
-        require(msg.value >= publicPackagePrice, "Package is not free");
+        require(privateSale == false && allowSale == true, "No sale now");
         require(pkCode <= 4 && pkCode >= 1, "No package");
         require(msg.sender != hostWallet, "You are host");
+        PackageItem memory pkg = getPackage(pkCode);
+        uint256 price = pkg.quantity * publicPackagePrice;
+        require(msg.value >= price, "Pkg not free");
+        buyPkg(pkg);
         payable(hostWallet).transfer(msg.value);
-        buyPkg(pkCode);
     }
 
     function buyPrivatePackage(uint256 pkCode) public payable {
-        require(privateSale == true, "No sale now");
-        require(msg.value >= privatePackagePrice, "Package is not free");
+        require(privateSale == true && allowSale == true, "No sale now");
         require(pkCode <= 6 && pkCode >= 5, "No package.");
         require(msg.sender != hostWallet, "You are host");
+        PackageItem memory pkg = getPackage(pkCode);
+        uint256 price = pkg.quantity * privatePackagePrice;
+        require(msg.value >= price, "Pkg not free");
+        buyPkg(pkg);
         payable(hostWallet).transfer(msg.value);
-        buyPkg(pkCode);
+    }
+    function buyPkg(PackageItem memory pkg) private {
+        uint256 nextItemCount = pkg.quantity + _tokenIds.current();
+        require(nextItemCount <= totalSupply, "Total supply has reached.");
+        _mint(msg.sender, pkg.packageId, 1, "");
+        if (privateSale == true) {
+            emit packageEvents(pkg.packageId, msg.value, "BUY_PRIVATE_PKG");
+        } else {
+            emit packageEvents(pkg.packageId, msg.value, "BUY_PUBLIC_PKG");
+        }
     }
 
+
     function openPackage(uint256 pkCode) public payable {
+        require(allowOpenPkg == true, "Not allow openPkg");
         require(pkCode <= 6 && pkCode >= 1, "No package");
         PackageItem memory pkg = getPackage(pkCode);
         require(this.balanceOf(msg.sender, pkg.packageId) > 0, "You have no package.");
@@ -156,13 +171,7 @@ contract DC8NFT is ERC1155URIStorage, Ownable {
         idToMarketItem[tokenId].price = price * 1e18;
         _itemsListed.increment();
         payable(hostWallet).transfer(msg.value);
-        safeTransferFrom(
-            payable(msg.sender),
-            payable(hostWallet),
-            tokenId,
-            1,
-            ""
-        );
+        safeTransferFrom(payable(msg.sender), payable(hostWallet), tokenId, 1, "");
         emit nftEvents(tokenId, msg.value, "LIST_NFT");
     }
 
@@ -185,7 +194,7 @@ contract DC8NFT is ERC1155URIStorage, Ownable {
         address seller = idToMarketItem[tokenId].seller;
         modifyItem(tokenId, payable(hostWallet), payable(msg.sender), payable(msg.sender));
         _itemsListed.decrement();
-        uint256 purchaseBonus = msg.value * 10 / 100;
+        uint256 purchaseBonus = (msg.value * 10) / 100;
         uint256 remain = msg.value - purchaseBonus;
         safeTransferFrom(payable(hostWallet), idToMarketItem[tokenId].owner, tokenId, 1, "");
         payable(hostWallet).transfer(purchaseBonus);
@@ -208,7 +217,7 @@ contract DC8NFT is ERC1155URIStorage, Ownable {
         uint256[] memory ids = new uint256[](_quantity);
         uint256[] memory amounts = new uint256[](_quantity);
         uint256 nextItemCount = _quantity + _tokenIds.current();
-        require(nextItemCount <= mintingMax, "Total supply has reached.");
+        require(nextItemCount <= totalSupply, "Total supply has reached.");
         for (uint256 i = 0; i < _quantity; i++) {
             _tokenIds.increment();
             uint256 tokenId = _tokenIds.current();
@@ -238,5 +247,9 @@ contract DC8NFT is ERC1155URIStorage, Ownable {
             }
         }
         return itemIds;
+    }
+
+    function getCurrentTokenId() public view returns (uint256) {
+        return _tokenIds.current();
     }
 }
